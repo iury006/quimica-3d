@@ -33,7 +33,7 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--
 <canvas id="c"></canvas>
 <div class="top">
   <div class="row"><button class="tab on" id="t0">1 · Modelos atômicos</button><button class="tab" id="t1">2 · Geometria molecular</button></div>
-  <div class="row"><button class="cam" id="cam">🖐️ Ativar câmera e mão</button><span id="st">Arraste para girar</span></div>
+  <div class="row"><button class="cam" id="cam">🖐️ Ativar câmera e mão</button><button class="cam" id="flip" style="display:none">🔄 Virar</button><span id="st">Arraste para girar</span></div>
 </div>
 <div class="bot"><div id="info"></div><div id="chips"></div></div>
 
@@ -111,7 +111,7 @@ MOLS.forEach(d=>{const bonds=d.b;d.build=function(){
 }});
 ATOMS.forEach(d=>d.build=d.b);
 
-let mode=0,cur=0;
+let mode=0,cur=0,facing='user',stream=null;
 function show(i){cur=i;const d=(mode?MOLS:ATOMS)[i];
   while(content.children.length)content.remove(content.children[0]);anims=[];d.build();
   $('info').innerHTML=`<h2>${d.n}</h2><small>${d.s}</small><p>${d.t}</p>`;
@@ -137,18 +137,23 @@ function onHands(r){
   const hH=Math.tan(25*Math.PI/180)*5,hW=hH*cam.aspect;
   const ids=[0,5,9,13,17],cx=ids.reduce((s,i)=>s+L[i].x,0)/5,cy=ids.reduce((s,i)=>s+L[i].y,0)/5;
   const hs=Math.hypot(L[9].x-L[0].x,L[9].y-L[0].y);
-  tp.set(((1-cx)-.5)*2*hW,(.5-cy)*2*hH+hs*2*hH*.55,0);
+  tp.set(((facing==='user'?1-cx:cx)-.5)*2*hW,(.5-cy)*2*hH+hs*2*hH*.55,0);
   ts=Math.max(.3,hs*2*hH*1.5)*zoom;
-  const roll=Math.atan2(-(L[9].x-L[0].x),-(L[9].y-L[0].y));
+  const m=facing==='user'?1:-1,roll=Math.atan2(-m*(L[9].x-L[0].x),-(L[9].y-L[0].y));
   const a=new THREE.Vector3(L[5].x-L[0].x,L[5].y-L[0].y,L[5].z-L[0].z),b=new THREE.Vector3(L[17].x-L[0].x,L[17].y-L[0].y,L[17].z-L[0].z);
   const n=a.cross(b).normalize();
-  tr.set(cl(n.y*1.6,1.4),cl(-n.x*1.6,1.4),-roll+Math.PI);
+  tr.set(cl(n.y*1.6,1.4),cl(-m*n.x*1.6,1.4),-roll+Math.PI);
 }
+async function openStream(){
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing},width:640,height:480},audio:false});
+  const v=$('v');v.srcObject=stream;await v.play();v.style.transform=facing==='user'?'scaleX(-1)':'none';
+}
+$('flip').onclick=async()=>{facing=facing==='user'?'environment':'user';try{await openStream()}catch(e){$('st').textContent='Não consegui virar a câmera.'}};
 async function startCam(){
   const st=$('st');
   try{
-    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:640,height:480},audio:false});
-    const v=$('v');v.srcObject=s;await v.play();v.style.display='block';camOn=true;$('cam').classList.add('on');$('cam').textContent='🖐️ Câmera ligada';
+    await openStream();$('v').style.display='block';$('flip').style.display='';camOn=true;$('cam').classList.add('on');$('cam').textContent='🖐️ Câmera ligada';
   }catch(e){st.textContent='Não consegui acessar a câmera. Permita o acesso e tente de novo.';return}
   st.textContent='Carregando rastreamento da mão…';
   try{
