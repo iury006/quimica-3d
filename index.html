@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Química 3D na mão v4</title>
-<script>document.title="Química 3D na mão v4"</script>
+<title>Química 3D na mão v6</title>
+<script>document.title="Química 3D na mão v6"</script>
 <style>
 :root{--bg:#0a0f1f;--glass:rgba(10,15,31,.72);--tx:#f2f5ff;--mu:#a9b4d6;--ac:#38bdf8;--bd:rgba(255,255,255,.14);box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0a0f1f}}
@@ -33,7 +33,7 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--
 <canvas id="c"></canvas>
 <div class="top">
   <div class="row"><button class="tab on" id="t0">1 · Modelos atômicos</button><button class="tab" id="t1">2 · Geometria molecular</button></div>
-  <div class="row"><button class="cam" id="cam">🖐️ Ativar câmera</button><button class="cam" id="flip">🔄 Virar</button><button class="cam" id="cal">🎯 Calibrar</button><button class="cam" id="fs">⛶ Tela cheia</button><button class="cam" id="hd">👁 Painel</button><label id="sml">Suavidade<input type="range" id="sm" min="0" max="100" value="50"></label></div><span id="st">Arraste para girar</span>
+  <div class="row"><button class="cam" id="cam">🖐️ Ativar câmera</button><button class="cam" id="flip">🔄 Virar</button><button class="cam" id="cal">🎯 Calibrar</button><button class="cam" id="pf">↔ Palma</button><button class="cam" id="fs">⛶ Tela cheia</button><button class="cam" id="hd">👁 Painel</button><label id="sml">Suavidade<input type="range" id="sm" min="0" max="100" value="50"></label></div><span id="st">Arraste para girar</span>
 </div>
 <div class="bot"><div id="info"></div><div id="chips"></div></div>
 
@@ -138,37 +138,65 @@ cv.addEventListener('pointermove',e=>{if(!drag)return;offY+=(e.clientX-lx)*.01;o
 cv.addEventListener('wheel',e=>{zoom=Math.min(2.5,Math.max(.5,zoom-e.deltaY*.001))},{passive:true});
 
 // mão
-let needCal=true,hand=false,lastSeen=0,camOn=false,hands=null,hSign=0,fs={},sm=50,ts=1.1;
-const tp=new THREE.Vector3(0,.9,0),tq=new THREE.Quaternion(),cal=new THREE.Quaternion();
-$('sm').oninput=e=>sm=+e.target.value;
-$('cal').onclick=()=>{needCal=true;$('st').textContent='Calibrado: a pose atual da mão virou a posição frontal'};
-$('hd').onclick=()=>document.body.classList.toggle('clean');
-$('fs').onclick=()=>{const d=document,e=d.documentElement;if(d.fullscreenElement||d.webkitFullscreenElement){(d.exitFullscreen||d.webkitExitFullscreen).call(d)}else{const f=e.requestFullscreen||e.webkitRequestFullscreen;if(f)f.call(e);else $('st').textContent='Tela cheia indisponível neste navegador. No iPhone: Compartilhar → Adicionar à Tela de Início.'}};
+let hand=false,lastSeen=0,camOn=false,hands=null,rv=0,palmFlip=false,sm=50,ts=1.1,prv=null,rej=0,pm0=0,pn=0,pvx=0,pvy=0;
+const cl=(v,a)=>Math.max(-a,Math.min(a,v));
+const tp=new THREE.Vector3(0,.9,0),tq=new THREE.Quaternion();
+/*CORE*/
+const V3={sub:(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],add:(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],mul:(a,s)=>[a[0]*s,a[1]*s,a[2]*s],dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],cross:(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],nrm:a=>{const l=Math.hypot(a[0],a[1],a[2])||1;return[a[0]/l,a[1]/l,a[2]/l]}};
+let fs={};
 // filtro One Euro: tira o tremor sem atrasar movimentos rápidos
 const oe=(k,x,t,mc,b)=>{let s=fs[k];if(!s){fs[k]={x,dx:0,t};return x}const dt=Math.max(t-s.t,.001),al=c=>1/(1+1/(2*Math.PI*c*dt));s.dx+=al(1)*((x-s.x)/dt-s.dx);s.x+=al(mc+b*Math.abs(s.dx))*(x-s.x);s.t=t;return s.x};
+const K={pp:[1,.02],pw:[.6,6],pm:[.5,.004]};
+// eixos da palma: z = normal que sai da palma, y = direção dos dedos (referencial da tela)
+function palm(W,right,mir){
+  const P=i=>[W[i].x,-W[i].y,-W[i].z],ids=[0,5,9,13,17];let n=[0,0,0],up=[0,0,0];
+  for(let i=0;i<5;i++)n=V3.add(n,V3.cross(P(ids[i]),P(ids[(i+1)%5])));
+  [5,9,13,17].forEach(i=>up=V3.add(up,V3.sub(P(i),P(0))));
+  const z=V3.nrm(V3.mul(n,right?1:-1));up=V3.nrm(up);
+  if(mir){z[0]=-z[0];up[0]=-up[0]}
+  const y=V3.nrm(V3.sub(up,V3.mul(z,V3.dot(up,z))));return{x:V3.cross(y,z),y,z}}
+// pixels por metro: independe da rotação da mão (compara projeções iguais), cresce ao aproximar
+function ppm(p,W){let a=0,b=0;[[0,9],[5,17],[0,5],[0,17],[5,9],[9,13],[13,17],[0,13]].forEach(([i,j])=>{a+=Math.hypot(p[i][0]-p[j][0],p[i][1]-p[j][1]);b+=Math.hypot(W[i].x-W[j].x,W[i].y-W[j].y)});return a/Math.max(b,1e-4)}
+// posição presa à palma: centro da palma + normal da palma
+function place(cx,cy,pm,n,IW,IH,zoom){
+  const hH=Math.tan(25*Math.PI/180)*5,hW=hH*IW/IH,k=2*hH/IH,s0=Math.max(.1,pm*k*.05)*zoom,off=s0*1.15*.95;
+  const x0=(cx/IW-.5)*2*hW,y0=(.5-cy/IH)*2*hH,z=n[2]*off,f=(5-z)/5;
+  return{x:(x0+n[0]*off)*f,y:(y0+n[1]*off)*f,z,s:s0*f}}
+function solve(px,W,t,mc,right,mir,IW,IH,zoom){
+  const ids=[0,5,9,13,17],p=[],w=[];
+  ids.forEach(i=>{p[i]=[oe('x'+i,px[i][0],t,mc*K.pp[0],K.pp[1]),oe('y'+i,px[i][1],t,mc*K.pp[0],K.pp[1])];
+    w[i]={x:oe('wx'+i,W[i].x,t,mc*K.pw[0],K.pw[1]),y:oe('wy'+i,W[i].y,t,mc*K.pw[0],K.pw[1]),z:oe('wz'+i,W[i].z,t,mc*K.pw[0],K.pw[1])}});
+  const B=palm(w,right,mir),cx=ids.reduce((s,i)=>s+p[i][0],0)/5,cy=ids.reduce((s,i)=>s+p[i][1],0)/5;
+  const pm=oe('ppm',ppm(p,w),t,mc*K.pm[0],K.pm[1]);
+  return{B,o:place(cx,cy,pm,B.z,IW,IH,zoom)}}
+/*ENDCORE*/
+$('sm').oninput=e=>sm=+e.target.value;
+$('cal').onclick=()=>{fs={};rv=0;hand=false;prv=null;pn=0;pm0=0;offX=0;offY=0;$('st').textContent='Calibrando: mostre a palma aberta por 1 segundo'};
+$('pf').onclick=()=>{palmFlip=!palmFlip;$('st').textContent=palmFlip?'Lado da palma invertido':'Lado da palma normal'};
+$('hd').onclick=()=>document.body.classList.toggle('clean');
+$('fs').onclick=()=>{const d=document,e=d.documentElement;if(d.fullscreenElement||d.webkitFullscreenElement){(d.exitFullscreen||d.webkitExitFullscreen).call(d)}else{const f=e.requestFullscreen||e.webkitRequestFullscreen;if(f)f.call(e);else $('st').textContent='Tela cheia indisponível neste navegador. No iPhone: Compartilhar → Adicionar à Tela de Início.'}};
 function onHands(r){
-  const L=r.multiHandLandmarks&&r.multiHandLandmarks[0];if(!L)return;const hd=r.multiHandedness&&r.multiHandedness[0];if(hd&&hd.score<.75)return;
-  const W=r.multiHandWorldLandmarks&&r.multiHandWorldLandmarks[0],t=performance.now()/1000,mc=3.2-sm*.028;
-  if(!hand){fs={};hSign=0;needCal=true;offX=0;offY=Math.atan2(Math.sin(offY),Math.cos(offY));$('st').textContent='Mão detectada ✔'}
-  hand=true;lastSeen=performance.now();
-  const v=$('v'),vw=v.videoWidth,vh=v.videoHeight,sc=Math.max(innerWidth/vw,innerHeight/vh),ox=(innerWidth-vw*sc)/2,oy=(innerHeight-vh*sc)/2,mir=facing==='user';
-  // posição e tamanho: mapeados pixel a pixel (corrige o corte do vídeo na tela)
-  const P=i=>{const x=oe('x'+i,L[i].x,t,mc,15),y=oe('y'+i,L[i].y,t,mc,15);let sx=x*vw*sc+ox;if(mir)sx=innerWidth-sx;return[sx,y*vh*sc+oy]};
-  const p=[0,5,9,13,17].map(P),cx=p.reduce((s,a)=>s+a[0],0)/5,cy=p.reduce((s,a)=>s+a[1],0)/5,len=Math.hypot(p[2][0]-p[0][0],p[2][1]-p[0][1]);
-  const hH=Math.tan(25*Math.PI/180)*5,hW=hH*cam.aspect,k=2*hH/innerHeight;
-  tp.set((cx/innerWidth-.5)*2*hW,(.5-cy/innerHeight)*2*hH+len*k*.4,0);
-  ts=Math.max(.2,len*k*.65)*zoom;
-  // orientação 3D completa da palma (usa coordenadas métricas da mão)
-  const kx=W?1:vw/1500,ky=W?1:vh/1500,Q=W||L;
-  const f=i=>{const q=Q[i];return new THREE.Vector3(oe('X'+i,(mir?-1:1)*q.x*kx,t,mc*.6,6),oe('Y'+i,-q.y*ky,t,mc*.6,6),oe('Z'+i,-q.z*kx,t,mc*.6,6))};
-  const A=f(0),B=f(5),C=f(9),D=f(17);
-  const up=C.sub(A).normalize(),nz=new THREE.Vector3().crossVectors(D.sub(B).normalize(),up);
-  if(!hSign)hSign=nz.z>=0?1:-1;
-  nz.multiplyScalar(hSign).normalize();
-  const yy=up.sub(nz.clone().multiplyScalar(up.dot(nz))).normalize(),xx=new THREE.Vector3().crossVectors(yy,nz);
-  const q0=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xx,yy,nz));
-  if(needCal){cal.copy(q0).invert();needCal=false}
-  tq.copy(q0).multiply(cal);
+  const L=r.multiHandLandmarks&&r.multiHandLandmarks[0];if(!L)return;
+  const hd=r.multiHandedness&&r.multiHandedness[0],vote=hd?(hd.label==='Left'?1:-1):0; // entrada sem espelho: o rótulo vem invertido
+  if(hd&&hd.score<.7)return; // camada 1: ignora quadros com baixa confiança
+  const t=performance.now()/1000,mc=3.2-sm*.028,v=$('v'),vw=v.videoWidth,vh=v.videoHeight,mir=facing==='user';
+  if(!hand){fs={};prv=null;rej=0;pm0=0;pn=0;pvx=pvy=0;rv=vote*3;$('st').textContent='Mão detectada ✔';offX=0;offY=Math.atan2(Math.sin(offY),Math.cos(offY))}
+  rv=Math.max(-6,Math.min(6,rv*.95+vote));hand=true;lastSeen=performance.now();
+  const sc=Math.max(innerWidth/vw,innerHeight/vh),ox=(innerWidth-vw*sc)/2,oy=(innerHeight-vh*sc)/2,px=[];
+  [0,5,9,13,17].forEach(i=>{let sx=L[i].x*vw*sc+ox;if(mir)sx=innerWidth-sx;px[i]=[sx,L[i].y*vh*sc+oy]});
+  let W=r.multiHandWorldLandmarks&&r.multiHandWorldLandmarks[0];
+  if(!W){const d=Math.hypot((L[9].x-L[0].x)*vw,(L[9].y-L[0].y)*vh,(L[9].z-L[0].z)*vw)||1,q=.095/d;W=L.map(a=>({x:(a.x-L[0].x)*vw*q,y:(a.y-L[0].y)*vh*q,z:(a.z-L[0].z)*vw*q}))}
+  // camada 7: rejeita saltos impossíveis · camada 8: compensa a latência (~30 ms) pela velocidade da mão
+  const gx=(px[0][0]+px[9][0])/2,gy=(px[0][1]+px[9][1])/2,gl=Math.hypot(px[9][0]-px[0][0],px[9][1]-px[0][1]);
+  if(prv&&t-prv.t<.25){const j=Math.hypot(gx-prv.x,gy-prv.y)/Math.hypot(innerWidth,innerHeight);if((j>.3||Math.abs(gl/prv.l-1)>.5)&&rej<4){rej++;return}
+    const d=Math.max(t-prv.t,.016);pvx=pvx*.7+(gx-prv.x)/d*.3;pvy=pvy*.7+(gy-prv.y)/d*.3}
+  rej=0;prv={x:gx,y:gy,l:gl,t};const sx=cl(pvx*.03,50),sy=cl(pvy*.03,50);px.forEach(a=>{a[0]+=sx;a[1]+=sy});
+  const R=solve(px,W,t,mc,(rv>=0)!==palmFlip,mir,innerWidth,innerHeight,zoom),B=R.B;
+  tp.set(R.o.x,R.o.y,R.o.z);
+  if(pn<12){pm0=(pm0*pn+R.o.s)/(pn+1);pn++}            // camada 9: distância de referência (média de 12 quadros)
+  ts=pm0*Math.pow(R.o.s/pm0,1.2);                      // aproximar amplia, afastar reduz (ganho 1,2)
+  tq.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(...B.x),new THREE.Vector3(...B.y),new THREE.Vector3(...B.z)));
+  cv.style.opacity=B.z[2]<-.25?.55:1;
 }
 async function openStream(){
   if(stream)stream.getTracks().forEach(t=>t.stop());
@@ -197,10 +225,11 @@ let last=performance.now();const ID=new THREE.Quaternion(),HOME=new THREE.Vector
 (function loop(now){
   requestAnimationFrame(loop);
   const dt=Math.min((now-last)/1000||.016,.1);last=now;anims.forEach(f=>f(now/1000));
-  if(hand&&now-lastSeen>600){hand=false;if(hands)$('st').textContent='Mão perdida. Mostre a palma de novo'}
-  if(hand){const ka=1-Math.exp(-dt*28),kr=1-Math.exp(-dt*22);holder.position.lerp(tp,ka);holder.scale.setScalar(holder.scale.x+(ts-holder.scale.x)*ka);holder.quaternion.slerp(tq,kr);if(!drag){const ko=1-Math.exp(-dt*8);offX-=offX*ko;offY-=offY*ko}}
+  if(hand&&now-lastSeen>600){hand=false;prv=null;cv.style.opacity=1;if(hands)$('st').textContent='Mão perdida. Mostre a palma de novo'}
+  if(hand){const ka=1-Math.exp(-dt*(18+25*Math.min(holder.position.distanceTo(tp),1))),kr=1-Math.exp(-dt*(14+30*Math.min(holder.quaternion.angleTo(tq),1)));  // camada 10: suavização adaptativa
+   holder.position.lerp(tp,ka);holder.scale.setScalar(holder.scale.x+(ts-holder.scale.x)*ka);holder.quaternion.slerp(tq,kr);if(!drag){const ko=1-Math.exp(-dt*8);offX-=offX*ko;offY-=offY*ko}}
   else{const k=1-Math.exp(-dt*5);holder.position.lerp(HOME,k);holder.scale.setScalar(holder.scale.x+(1.15*zoom-holder.scale.x)*k);holder.quaternion.slerp(ID,k);if(!drag)offY+=dt*.4}
-  content.rotation.set(offX,offY,0);
+  const T=now/1000,rk=hand?1:0;content.rotation.set(offX+rk*Math.sin(T*.6)*.12,offY+rk*Math.sin(T*.8)*.35,0); // balanço suave constante
   renderer.render(scene,cam);
 })(performance.now());
 setMode(0);
