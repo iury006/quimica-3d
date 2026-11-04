@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Química 3D na mão</title>
-<script>document.title="Química 3D na mão"</script>
+<title>Química 3D na mão v2</title>
+<script>document.title="Química 3D na mão v2"</script>
 <style>
 :root{--bg:#0a0f1f;--glass:rgba(10,15,31,.72);--tx:#f2f5ff;--mu:#a9b4d6;--ac:#38bdf8;--bd:rgba(255,255,255,.14);box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0a0f1f}}
@@ -33,7 +33,7 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--
 <canvas id="c"></canvas>
 <div class="top">
   <div class="row"><button class="tab on" id="t0">1 · Modelos atômicos</button><button class="tab" id="t1">2 · Geometria molecular</button></div>
-  <div class="row"><button class="cam" id="cam">🖐️ Ativar câmera e mão</button><button class="cam" id="flip" style="display:none">🔄 Virar</button><span id="st">Arraste para girar</span></div>
+  <div class="row"><button class="cam" id="cam">🖐️ Ativar câmera e mão</button><button class="cam" id="flip">🔄 Virar câmera</button><span id="st">Arraste para girar</span></div>
 </div>
 <div class="bot"><div id="info"></div><div id="chips"></div></div>
 
@@ -149,11 +149,11 @@ async function openStream(){
   stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing},width:640,height:480},audio:false});
   const v=$('v');v.srcObject=stream;await v.play();v.style.transform=facing==='user'?'scaleX(-1)':'none';
 }
-$('flip').onclick=async()=>{facing=facing==='user'?'environment':'user';try{await openStream()}catch(e){$('st').textContent='Não consegui virar a câmera.'}};
+$('flip').onclick=async()=>{facing=facing==='user'?'environment':'user';if(!camOn){startCam();return}try{await openStream()}catch(e){$('st').textContent='Não consegui virar a câmera.'}};
 async function startCam(){
   const st=$('st');
   try{
-    await openStream();$('v').style.display='block';$('flip').style.display='';camOn=true;$('cam').classList.add('on');$('cam').textContent='🖐️ Câmera ligada';
+    await openStream();$('v').style.display='block';camOn=true;$('cam').classList.add('on');$('cam').textContent='🖐️ Câmera ligada';
   }catch(e){st.textContent='Não consegui acessar a câmera. Permita o acesso e tente de novo.';return}
   st.textContent='Carregando rastreamento da mão…';
   try{
