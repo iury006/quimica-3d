@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Química 3D na mão v3</title>
-<script>document.title="Química 3D na mão v3"</script>
+<title>Química 3D na mão v4</title>
+<script>document.title="Química 3D na mão v4"</script>
 <style>
 :root{--bg:#0a0f1f;--glass:rgba(10,15,31,.72);--tx:#f2f5ff;--mu:#a9b4d6;--ac:#38bdf8;--bd:rgba(255,255,255,.14);box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:dark}
 @media (prefers-color-scheme:dark){:root{--bg:#0a0f1f}}
@@ -16,7 +16,7 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--
 .top,.bot{position:fixed;left:0;right:0;padding:10px 12px;display:flex;flex-direction:column;gap:8px;pointer-events:none}
 .top{top:env(safe-area-inset-top,0px)}.bot{bottom:env(safe-area-inset-bottom,0px)}
 .top>*,.bot>*{pointer-events:auto}
-.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}#sml{font-size:12px;color:var(--mu);display:flex;gap:6px;align-items:center;background:var(--glass);border-radius:999px;padding:6px 10px}#sml input{width:70px}
+.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}body.clean .bot{display:none}#sml{font-size:12px;color:var(--mu);display:flex;gap:6px;align-items:center;background:var(--glass);border-radius:999px;padding:6px 10px}#sml input{width:70px}
 .tab,.cam,.chip{border:1px solid var(--bd);background:var(--glass);color:var(--tx);border-radius:999px;padding:10px 14px;font-family:inherit;font-weight:600;font-size:14px;backdrop-filter:blur(8px)}
 .tab{flex:1;padding:9px 6px;font-size:13px}.tab.on,.chip.on{background:var(--ac);color:#04121f;border-color:var(--ac)}
 .cam{white-space:nowrap}.cam.on{border-color:#4ade80;color:#4ade80}
@@ -33,7 +33,7 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--
 <canvas id="c"></canvas>
 <div class="top">
   <div class="row"><button class="tab on" id="t0">1 · Modelos atômicos</button><button class="tab" id="t1">2 · Geometria molecular</button></div>
-  <div class="row"><button class="cam" id="cam">🖐️ Ativar câmera</button><button class="cam" id="flip">🔄 Virar</button><label id="sml">Suavidade<input type="range" id="sm" min="0" max="100" value="50"></label></div><span id="st">Arraste para girar</span>
+  <div class="row"><button class="cam" id="cam">🖐️ Ativar câmera</button><button class="cam" id="flip">🔄 Virar</button><button class="cam" id="cal">🎯 Calibrar</button><button class="cam" id="fs">⛶ Tela cheia</button><button class="cam" id="hd">👁 Painel</button><label id="sml">Suavidade<input type="range" id="sm" min="0" max="100" value="50"></label></div><span id="st">Arraste para girar</span>
 </div>
 <div class="bot"><div id="info"></div><div id="chips"></div></div>
 
@@ -138,23 +138,26 @@ cv.addEventListener('pointermove',e=>{if(!drag)return;offY+=(e.clientX-lx)*.01;o
 cv.addEventListener('wheel',e=>{zoom=Math.min(2.5,Math.max(.5,zoom-e.deltaY*.001))},{passive:true});
 
 // mão
-let hand=false,lastSeen=0,camOn=false,hands=null,hSign=0,fs={},sm=50,ts=1.1;
-const tp=new THREE.Vector3(0,.9,0),tq=new THREE.Quaternion();
+let needCal=true,hand=false,lastSeen=0,camOn=false,hands=null,hSign=0,fs={},sm=50,ts=1.1;
+const tp=new THREE.Vector3(0,.9,0),tq=new THREE.Quaternion(),cal=new THREE.Quaternion();
 $('sm').oninput=e=>sm=+e.target.value;
+$('cal').onclick=()=>{needCal=true;$('st').textContent='Calibrado: a pose atual da mão virou a posição frontal'};
+$('hd').onclick=()=>document.body.classList.toggle('clean');
+$('fs').onclick=()=>{const d=document,e=d.documentElement;if(d.fullscreenElement||d.webkitFullscreenElement){(d.exitFullscreen||d.webkitExitFullscreen).call(d)}else{const f=e.requestFullscreen||e.webkitRequestFullscreen;if(f)f.call(e);else $('st').textContent='Tela cheia indisponível neste navegador. No iPhone: Compartilhar → Adicionar à Tela de Início.'}};
 // filtro One Euro: tira o tremor sem atrasar movimentos rápidos
 const oe=(k,x,t,mc,b)=>{let s=fs[k];if(!s){fs[k]={x,dx:0,t};return x}const dt=Math.max(t-s.t,.001),al=c=>1/(1+1/(2*Math.PI*c*dt));s.dx+=al(1)*((x-s.x)/dt-s.dx);s.x+=al(mc+b*Math.abs(s.dx))*(x-s.x);s.t=t;return s.x};
 function onHands(r){
-  const L=r.multiHandLandmarks&&r.multiHandLandmarks[0];if(!L)return;
+  const L=r.multiHandLandmarks&&r.multiHandLandmarks[0];if(!L)return;const hd=r.multiHandedness&&r.multiHandedness[0];if(hd&&hd.score<.75)return;
   const W=r.multiHandWorldLandmarks&&r.multiHandWorldLandmarks[0],t=performance.now()/1000,mc=3.2-sm*.028;
-  if(!hand){fs={};hSign=0;$('st').textContent='Mão detectada ✔'}
+  if(!hand){fs={};hSign=0;needCal=true;offX=0;offY=Math.atan2(Math.sin(offY),Math.cos(offY));$('st').textContent='Mão detectada ✔'}
   hand=true;lastSeen=performance.now();
   const v=$('v'),vw=v.videoWidth,vh=v.videoHeight,sc=Math.max(innerWidth/vw,innerHeight/vh),ox=(innerWidth-vw*sc)/2,oy=(innerHeight-vh*sc)/2,mir=facing==='user';
   // posição e tamanho: mapeados pixel a pixel (corrige o corte do vídeo na tela)
   const P=i=>{const x=oe('x'+i,L[i].x,t,mc,15),y=oe('y'+i,L[i].y,t,mc,15);let sx=x*vw*sc+ox;if(mir)sx=innerWidth-sx;return[sx,y*vh*sc+oy]};
   const p=[0,5,9,13,17].map(P),cx=p.reduce((s,a)=>s+a[0],0)/5,cy=p.reduce((s,a)=>s+a[1],0)/5,len=Math.hypot(p[2][0]-p[0][0],p[2][1]-p[0][1]);
   const hH=Math.tan(25*Math.PI/180)*5,hW=hH*cam.aspect,k=2*hH/innerHeight;
-  tp.set((cx/innerWidth-.5)*2*hW,(.5-cy/innerHeight)*2*hH+len*k*.5,0);
-  ts=Math.max(.25,len*k*1.45)*zoom;
+  tp.set((cx/innerWidth-.5)*2*hW,(.5-cy/innerHeight)*2*hH+len*k*.4,0);
+  ts=Math.max(.2,len*k*.65)*zoom;
   // orientação 3D completa da palma (usa coordenadas métricas da mão)
   const kx=W?1:vw/1500,ky=W?1:vh/1500,Q=W||L;
   const f=i=>{const q=Q[i];return new THREE.Vector3(oe('X'+i,(mir?-1:1)*q.x*kx,t,mc*.6,6),oe('Y'+i,-q.y*ky,t,mc*.6,6),oe('Z'+i,-q.z*kx,t,mc*.6,6))};
@@ -163,7 +166,9 @@ function onHands(r){
   if(!hSign)hSign=nz.z>=0?1:-1;
   nz.multiplyScalar(hSign).normalize();
   const yy=up.sub(nz.clone().multiplyScalar(up.dot(nz))).normalize(),xx=new THREE.Vector3().crossVectors(yy,nz);
-  tq.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xx,yy,nz));
+  const q0=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xx,yy,nz));
+  if(needCal){cal.copy(q0).invert();needCal=false}
+  tq.copy(q0).multiply(cal);
 }
 async function openStream(){
   if(stream)stream.getTracks().forEach(t=>t.stop());
@@ -193,7 +198,7 @@ let last=performance.now();const ID=new THREE.Quaternion(),HOME=new THREE.Vector
   requestAnimationFrame(loop);
   const dt=Math.min((now-last)/1000||.016,.1);last=now;anims.forEach(f=>f(now/1000));
   if(hand&&now-lastSeen>600){hand=false;if(hands)$('st').textContent='Mão perdida. Mostre a palma de novo'}
-  if(hand){const ka=1-Math.exp(-dt*28),kr=1-Math.exp(-dt*22);holder.position.lerp(tp,ka);holder.scale.setScalar(holder.scale.x+(ts-holder.scale.x)*ka);holder.quaternion.slerp(tq,kr)}
+  if(hand){const ka=1-Math.exp(-dt*28),kr=1-Math.exp(-dt*22);holder.position.lerp(tp,ka);holder.scale.setScalar(holder.scale.x+(ts-holder.scale.x)*ka);holder.quaternion.slerp(tq,kr);if(!drag){const ko=1-Math.exp(-dt*8);offX-=offX*ko;offY-=offY*ko}}
   else{const k=1-Math.exp(-dt*5);holder.position.lerp(HOME,k);holder.scale.setScalar(holder.scale.x+(1.15*zoom-holder.scale.x)*k);holder.quaternion.slerp(ID,k);if(!drag)offY+=dt*.4}
   content.rotation.set(offX,offY,0);
   renderer.render(scene,cam);
